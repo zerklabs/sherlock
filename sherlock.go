@@ -1,6 +1,7 @@
 package sherlock
 
 import (
+	"math"
 	"strings"
 )
 
@@ -74,70 +75,159 @@ var (
 		"/":  40,
 		"$":  41,
 		".":  42,
+		",":  43,
+		"!":  44,
+		"@":  45,
+		"#":  46,
+		"%":  47,
+		"^":  48,
+		"&":  49,
+		"*":  50,
+		"(":  51,
+		")":  52,
+		"_":  53,
+		"+":  54,
+		"=":  55,
+		"<":  56,
+		">":  57,
+		"?":  58,
+		"\"": 59,
+		"'":  60,
+		";":  61,
+		"|":  62,
+		"[":  63,
+		"]":  64,
+		"{":  65,
+		"}":  66,
 	}
 )
+
+type TDIDF struct {
+	Word                     string
+	RawTermFrequency         int
+	LineFrequency            int
+	TermFrequency            float64
+	InverseDocumentFrequency float64
+	Total                    float64
+	Score                    float64
+	Classification           int
+	PositionKey              int
+}
 
 func TokenizeLine(line string) []string {
 	return strings.Split(line, " ")
 }
 
-func ScoreWord(word string) float32 {
-	var score float32
-	// wordLength := len(word)
-
-	score = 0.0
-	split := strings.Split(word, "")
-
-	// for keeping track of the last position in the
-	// alphabet for the last character seen
-	lastPosition := 0
-
-	for _, v := range split {
-		// currently not ranking non-alphabetic characters
-		if alphabet[v] > 0 {
-			if lastPosition == 0 {
-				lastPosition = alphabet[v]
-			} else {
-				dist := lastPosition - alphabet[v]
-
-				// get the absolute value of dist
-				if dist < 0 {
-					dist = -dist
-				}
-
-				percentDist := (dist / len(alphabet)) * 100
-
-				// if the current letter and the last are further than 50% away,
-				// calculate a partial loss
-				if percentDist >= 50 {
-					score = score - 0.2
-				} else if percentDist >= 0 {
-					// otherwise, improve the score of this word
-					score = score + 0.2
-				} else if percentDist == 0 {
-					score = score - 0.4
-				}
-			}
-		} else {
-			// partial loss for non-captured characters
-			score = score - 0.1
-		}
-
-		// set the last position to this character
-		lastPosition = alphabet[v]
-	}
-
-	return score
+// Calculate the raw frequency (number of occurrences) of a given word
+func (self *TDIDF) RawFrequency(doc *string) {
+	self.RawTermFrequency = strings.Count(*doc, self.Word)
 }
 
-func ClassifyScore(score float32) int {
-	if score <= 0.3 {
-		return -1
-	}
+// Calculate the td-idf
+func (self *TDIDF) Frequency(maxRawFrequency int, totalWords int) {
+	// augmented frequency to prevent bias towards longer documents (# of lines)
+	self.TermFrequency = float64(float64(0.5) + ((float64(0.5) * float64(self.RawTermFrequency)) / float64(maxRawFrequency)))
 
-	if score <= 0.6 {
-		return 0
-	}
+	// using the logarithmically scaled frequency
+	self.InverseDocumentFrequency = math.Log(float64(totalWords / (1.0 + self.RawTermFrequency)))
+	self.Total = (self.TermFrequency * self.InverseDocumentFrequency)
+}
 
-	return 1
+func (self *TDIDF) ScoreWord() {
+	var score float64
+	var unresolvedLoss float64
+	var unresolvedPercent int
+	var unresolved int
+	var percentDist int
+	var lastPosition int
+	var wordLength int
+
+	// store the length of the given word
+	wordLength = len(self.Word)
+	// for keeping track of the last position in the
+	// alphabet for the last character seen
+	lastPosition = 0
+
+	// starting score
+	score = 0.0
+
+	// starting unresolved loss
+	unresolvedLoss = 0.0
+
+	// start characters that were unresolved
+	unresolved = 0
+
+	if wordLength == 0 {
+		self.Score = 0.0
+	} else if wordLength < 4 {
+		self.Score = 0.0
+	} else {
+
+		// break the word up into characters
+		split := strings.Split(self.Word, "")
+
+		for _, v := range split {
+			// currently not ranking non-alphabetic characters
+			if alphabet[v] > 0 {
+				if lastPosition == 0 {
+					lastPosition = alphabet[v]
+				} else {
+					dist := lastPosition - alphabet[v]
+
+					// get the absolute value of dist
+					if dist < 0 {
+						dist = -dist
+					}
+
+					percentDist = (dist / len(alphabet)) * 100
+
+					// if the current letter and the last are further than 50% away,
+					// calculate a partial loss
+					if percentDist >= 50 {
+						score = score - 0.2
+					} else if percentDist >= 0 {
+						// otherwise, improve the score of this word
+						score = score + 0.2
+					} else if percentDist == 0 {
+						score = score - 0.4
+					}
+				}
+			} else {
+				// partial loss for non-captured characters
+				score = score - 0.1
+
+				unresolved = unresolved + 1
+			}
+
+			// set the last position to this character
+			lastPosition = alphabet[v]
+		}
+
+		unresolvedPercent = (unresolved / wordLength) * 100
+
+		for i := 0; i < unresolved; i++ {
+			unresolvedLoss += 0.1
+		}
+
+		// subtract the unresolved loss from the overall score
+		// 0.1 penalty per unresolved character
+		score = score - unresolvedLoss
+
+		// penalty for a larger set of unresolved characters
+		if unresolvedPercent >= 50 {
+			score = score - 0.2
+		}
+
+		self.Score = score
+	}
+}
+
+func (self *TDIDF) ClassifyScore() {
+	if self.Score <= 0.3 {
+		self.Classification = -1
+	} else if self.Score <= 0.8 {
+		self.Classification = 0
+	} else {
+		self.Classification = 1
+	}
 }
