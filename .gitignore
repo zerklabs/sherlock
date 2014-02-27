@@ -214,3 +214,4 @@ pip-log.txt
 
 corpus/
 runs/*.out
+runs/*.gob

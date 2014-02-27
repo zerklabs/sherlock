@@ -1,6 +1,9 @@
 package sherlock
 
 import (
+	"bytes"
+	"encoding/gob"
+	"log"
 	"math"
 	"strings"
 )
@@ -111,7 +114,8 @@ type TDIDF struct {
 	Total                    float64
 	Score                    float64
 	Classification           int
-	PositionKey              int
+	LeftNeighbor             *TDIDF
+	RightNeighbor            *TDIDF
 }
 
 func TokenizeLine(line string) []string {
@@ -123,7 +127,7 @@ func (self *TDIDF) RawFrequency(doc *string) {
 	self.RawTermFrequency = strings.Count(*doc, self.Word)
 }
 
-// Calculate the td-idf
+// Calculate the TD-IDF
 func (self *TDIDF) Frequency(maxRawFrequency int, totalWords int) {
 	// augmented frequency to prevent bias towards longer documents (# of lines)
 	self.TermFrequency = float64(float64(0.5) + ((float64(0.5) * float64(self.RawTermFrequency)) / float64(maxRawFrequency)))
@@ -133,6 +137,8 @@ func (self *TDIDF) Frequency(maxRawFrequency int, totalWords int) {
 	self.Total = (self.TermFrequency * self.InverseDocumentFrequency)
 }
 
+// Using a variation of [k-NN](http://en.wikipedia.org/wiki/K-nearest_neighbors_algorithm),
+// rank words based on the distances in the known alphabet of each of its characters
 func (self *TDIDF) ScoreWord() {
 	var score float64
 	var unresolvedLoss float64
@@ -223,11 +229,39 @@ func (self *TDIDF) ScoreWord() {
 }
 
 func (self *TDIDF) ClassifyScore() {
-	if self.Score <= 0.3 {
+	if self.Score <= 0.5 {
 		self.Classification = -1
-	} else if self.Score <= 0.8 {
+	} else if self.Score <= 0.9 {
 		self.Classification = 0
 	} else {
 		self.Classification = 1
 	}
+}
+
+// Marshal the ObjMetadata struct into a byte array
+func (self *TDIDF) Marshal() []byte {
+	var bin bytes.Buffer
+
+	// Create an encoder and send a value.
+	enc := gob.NewEncoder(&bin)
+	err := enc.Encode(self)
+
+	if err != nil {
+		log.Fatal("encode:", err)
+	}
+
+	return bin.Bytes()
+}
+
+// Marshal the User struct into a byte array
+func (self *TDIDF) Unmarshal(u []byte) *TDIDF {
+	dec := gob.NewDecoder(bytes.NewBuffer(u))
+
+	err := dec.Decode(&self)
+
+	if err != nil {
+		log.Fatal("decode:", err)
+	}
+
+	return self
 }
