@@ -1,9 +1,6 @@
 package sherlock
 
 import (
-	"bytes"
-	"encoding/gob"
-	"log"
 	"math"
 	"strings"
 )
@@ -105,7 +102,7 @@ var (
 	}
 )
 
-type TDIDF struct {
+type TFIDF struct {
 	Word                     string
 	RawTermFrequency         int
 	LineFrequency            int
@@ -114,8 +111,8 @@ type TDIDF struct {
 	Total                    float64
 	Score                    float64
 	Classification           int
-	LeftNeighbor             *TDIDF
-	RightNeighbor            *TDIDF
+	LeftNeighbor             *TFIDF
+	RightNeighbor            *TFIDF
 }
 
 func TokenizeLine(line string) []string {
@@ -123,12 +120,12 @@ func TokenizeLine(line string) []string {
 }
 
 // Calculate the raw frequency (number of occurrences) of a given word
-func (self *TDIDF) RawFrequency(doc *string) {
+func (self *TFIDF) RawFrequency(doc *string) {
 	self.RawTermFrequency = strings.Count(*doc, self.Word)
 }
 
 // Calculate the TD-IDF
-func (self *TDIDF) Frequency(maxRawFrequency int, totalWords int) {
+func (self *TFIDF) Frequency(maxRawFrequency int, totalWords int) {
 	// augmented frequency to prevent bias towards longer documents (# of lines)
 	self.TermFrequency = float64(float64(0.5) + ((float64(0.5) * float64(self.RawTermFrequency)) / float64(maxRawFrequency)))
 
@@ -139,7 +136,7 @@ func (self *TDIDF) Frequency(maxRawFrequency int, totalWords int) {
 
 // Using a variation of [k-NN](http://en.wikipedia.org/wiki/K-nearest_neighbors_algorithm),
 // rank words based on the distances in the known alphabet of each of its characters
-func (self *TDIDF) ScoreWord() {
+func (self *TFIDF) ScoreWord() {
 	var score float64
 	var unresolvedLoss float64
 	var unresolvedPercent int
@@ -228,7 +225,7 @@ func (self *TDIDF) ScoreWord() {
 	}
 }
 
-func (self *TDIDF) ClassifyScore() {
+func (self *TFIDF) ClassifyScore() {
 	if self.Score <= 0.5 {
 		self.Classification = -1
 	} else if self.Score <= 0.9 {
@@ -236,32 +233,4 @@ func (self *TDIDF) ClassifyScore() {
 	} else {
 		self.Classification = 1
 	}
-}
-
-// Marshal the ObjMetadata struct into a byte array
-func (self *TDIDF) Marshal() []byte {
-	var bin bytes.Buffer
-
-	// Create an encoder and send a value.
-	enc := gob.NewEncoder(&bin)
-	err := enc.Encode(self)
-
-	if err != nil {
-		log.Fatal("encode:", err)
-	}
-
-	return bin.Bytes()
-}
-
-// Marshal the User struct into a byte array
-func (self *TDIDF) Unmarshal(u []byte) *TDIDF {
-	dec := gob.NewDecoder(bytes.NewBuffer(u))
-
-	err := dec.Decode(&self)
-
-	if err != nil {
-		log.Fatal("decode:", err)
-	}
-
-	return self
 }

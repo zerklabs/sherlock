@@ -2,16 +2,12 @@ package main
 
 import (
 	"bufio"
-	// "bytes"
-	"encoding/gob"
 	"flag"
 	"fmt"
 	"github.com/zerklabs/sherlock"
-	"io"
 	"log"
 	"os"
 	"strings"
-	"time"
 )
 
 var (
@@ -20,26 +16,21 @@ var (
 	fileToSearch = flag.String("file", "", "File to read in and search")
 
 	isMinSCORESet = false
-	isMinTDIDFSet = false
+	isMinTFIDFSet = false
 
 	lines []string
 
 	maxRawFrequency int
 
 	maxSCORE float64
-	maxTDIDF float64
+	maxTFIDF float64
 	minSCORE float64
-	minTDIDF float64
-
-	outputFileName    string
-	outputGobFileName string
-	outputHandle      *os.File
-	outputGobHandle   *os.File
+	minTFIDF float64
 
 	printGarbage    = flag.Bool("garbage", false, "If enabled, will print low ranking lines")
 	printSupervised = flag.Bool("supervised", false, "If enabled, will print lines needing supervision")
 
-	tdidf []sherlock.TDIDF
+	tfidf []sherlock.TFIDF
 
 	totalWords int
 )
@@ -51,17 +42,8 @@ func main() {
 		log.Fatal("File expected to be given. Use --help")
 	}
 
-	outputFileName = fmt.Sprintf("runs/%d.out", time.Now().Unix())
-	outputGobFileName = fmt.Sprintf("%s.gob", outputFileName)
-
-	outputHandle, err := os.Create(outputFileName)
-	defer outputHandle.Close()
-
 	rfile, err := os.Open(*fileToSearch)
 	defer rfile.Close()
-
-	outputGobHandle, err := os.Create(outputGobFileName)
-	defer outputGobHandle.Close()
 
 	if err != nil {
 		log.Fatal(err)
@@ -78,8 +60,8 @@ func main() {
 		// create initial collection
 		for _, v := range words {
 			if len(v) > 0 {
-				f := &sherlock.TDIDF{Word: v}
-				tdidf = append(tdidf, *f)
+				f := &sherlock.TFIDF{Word: v}
+				tfidf = append(tfidf, *f)
 			}
 		}
 	}
@@ -97,51 +79,50 @@ func main() {
 
 	log.Printf("Total words: %d\n", totalWords)
 	log.Printf("Total lines: %d\n", len(lines))
-	log.Printf("Maximum TD-IDF: %f\n", maxTDIDF)
-	log.Printf("Minimum TD-IDF: %f\n", minTDIDF)
+	log.Printf("Maximum TD-IDF: %f\n", maxTFIDF)
+	log.Printf("Minimum TD-IDF: %f\n", minTFIDF)
 	log.Printf("Maximum Score: %f\n", maxSCORE)
 	log.Printf("Minimum Score: %f\n", minSCORE)
-	log.Printf("Wrote output to: %s\n", outputFileName)
 
-	writeCollection()
-	log.Printf("Wrote collection to: %s.gob\n", outputFileName)
+	// writeCollection()
+	// log.Printf("Wrote collection to: %s.gob\n", outputFileName)
 }
 
-func writeCollection() {
-	pr, pw := io.Pipe()
-	defer pr.Close()
-	defer pw.Close()
+// func writeCollection() {
+// 	pr, pw := io.Pipe()
+// 	defer pr.Close()
+// 	defer pw.Close()
 
-	io.Copy(outputGobHandle, pr)
+// 	io.Copy(outputGobHandle, pr)
 
-	// Create an encoder and send a value.
-	enc := gob.NewEncoder(pw)
-	err := enc.Encode(tdidf)
+// 	// Create an encoder and send a value.
+// 	enc := gob.NewEncoder(pw)
+// 	err := enc.Encode(tfidf)
 
-	if err != nil {
-		log.Fatal("encode:", err)
-	}
-}
+// 	if err != nil {
+// 		log.Fatal("encode:", err)
+// 	}
+// }
 
 func assignNeighbors() {
 	log.Println("Assigning neighboors")
 
 	// assign neighbors
-	var prevOne *sherlock.TDIDF
-	var nextOne *sherlock.TDIDF
+	var prevOne *sherlock.TFIDF
+	var nextOne *sherlock.TFIDF
 
-	for k, v := range tdidf {
+	for k, v := range tfidf {
 		if k > 0 {
-			prevOne = &tdidf[k-1]
+			prevOne = &tfidf[k-1]
 
-			if k+1 < len(tdidf) {
-				nextOne = &tdidf[k+1]
+			if k+1 < len(tfidf) {
+				nextOne = &tfidf[k+1]
 			}
 		}
 
 		v.LeftNeighbor = prevOne
 		v.RightNeighbor = nextOne
-		tdidf[k] = v
+		tfidf[k] = v
 	}
 }
 
@@ -149,7 +130,7 @@ func assignNeighbors() {
 func generateScores() {
 	log.Println("Generating k-NN scores")
 
-	for k, v := range tdidf {
+	for k, v := range tfidf {
 		v.ScoreWord()
 		v.ClassifyScore()
 
@@ -166,13 +147,14 @@ func generateScores() {
 			isMinSCORESet = true
 		}
 
-		tdidf[k] = v
+		tfidf[k] = v
 	}
 }
 
 func generateRawTF() {
 	log.Println("Calculating Raw TF")
-	for k, v := range tdidf {
+
+	for k, v := range tfidf {
 		totalWords += 1
 		v.RawFrequency(&doc)
 
@@ -180,29 +162,30 @@ func generateRawTF() {
 			maxRawFrequency = v.RawTermFrequency
 		}
 
-		tdidf[k] = v
+		tfidf[k] = v
 	}
 }
 
 func generateTFIDF() {
 	log.Println("Calculating TF-IDF")
-	for k, v := range tdidf {
+	for k, v := range tfidf {
 		v.Frequency(maxRawFrequency, totalWords)
-		outputHandle.WriteString(fmt.Sprintf("%s|TDIDF:%f,TF:%f,IDF:%f,S:%f,C:%d\n", v.Word, v.Total, v.TermFrequency, v.InverseDocumentFrequency, v.Score, v.Classification))
+		tfidf[k] = v
 
-		if v.Total > maxTDIDF {
-			maxTDIDF = v.Total
+		fmt.Printf("%s|TFIDF:%f,TF:%f,IDF:%f,S:%f,C:%d\n", v.Word, v.Total, v.TermFrequency, v.InverseDocumentFrequency, v.Score, v.Classification)
+
+		if v.Total > maxTFIDF {
+			maxTFIDF = v.Total
 		}
 
-		if isMinTDIDFSet {
-			if v.Total < minTDIDF {
-				minTDIDF = v.Total
+		if isMinTFIDFSet {
+			if v.Total < minTFIDF {
+				minTFIDF = v.Total
 			}
 		} else {
-			minTDIDF = v.Total
-			isMinTDIDFSet = true
+			minTFIDF = v.Total
+			isMinTFIDFSet = true
 		}
 
-		tdidf[k] = v
 	}
 }
